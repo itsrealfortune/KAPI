@@ -256,6 +256,9 @@ func (m RecapModel) gitValue() string {
 		} else {
 			v += " (public)"
 		}
+		if m.gitCfg.RepoName != "" {
+			v += ": " + m.gitCfg.RepoName
+		}
 		parts = append(parts, v)
 	case "":
 	default:

@@ -69,7 +69,10 @@ func Plan(
 func remoteSteps(targetDir string, gitCfg screens.GitConfig) []Step {
 	switch gitCfg.RemoteHost {
 	case "github":
-		name := filepath.Base(targetDir)
+		name := gitCfg.RepoName
+		if name == "" {
+			name = filepath.Base(targetDir)
+		}
 		private := gitCfg.RemotePrivate
 		sshURL := new(string)
 

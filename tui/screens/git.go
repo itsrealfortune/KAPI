@@ -12,11 +12,12 @@ import (
 )
 
 const (
-	gitFieldInit   = 0
-	gitFieldRemote = 1
-	gitFieldURL    = 2
-	gitFieldCollab = 3
-	gitFieldCI     = 4
+	gitFieldInit     = 0
+	gitFieldRemote   = 1
+	gitFieldRepoName = 2
+	gitFieldURL      = 3
+	gitFieldCollab   = 4
+	gitFieldCI       = 5
 )
 
 const (
@@ -73,6 +74,7 @@ type GitConfig struct {
 	RemoteURL     string
 	RemoteHost    string
 	RemotePrivate bool
+	RepoName      string
 	Collab        bool
 	CI            string
 }
@@ -118,10 +120,14 @@ type GitModel struct {
 
 	cursor int
 
-	initOpt   int 
-	remoteOpt int 
-	collabOpt int 
-	ciOpt     int 
+	initOpt   int
+	remoteOpt int
+	collabOpt int
+	ciOpt     int
+
+	repoNameInput    string
+	repoNameInputPos int
+	repoNameEditing  bool
 
 	urlInput    string
 	urlInputPos int
@@ -158,8 +164,12 @@ func Git(width, height int, targetDir string, cfg GitConfig) GitModel {
 		m.urlInput = cfg.RemoteURL
 	case cfg.RemoteHost == "github" && cfg.RemotePrivate:
 		m.remoteOpt = gitRemoteGithubPrivate
+		m.repoNameInput = cfg.RepoName
+		m.repoNameInputPos = len([]rune(m.repoNameInput))
 	case cfg.RemoteHost == "github" && !cfg.RemotePrivate:
 		m.remoteOpt = gitRemoteGithubPublic
+		m.repoNameInput = cfg.RepoName
+		m.repoNameInputPos = len([]rune(m.repoNameInput))
 	case cfg.RemoteURL != "":
 		m.remoteOpt = gitRemoteExisting
 		m.urlInput = cfg.RemoteURL
@@ -207,9 +217,11 @@ func (m GitModel) Config() GitConfig {
 		case gitRemoteGithubPrivate:
 			cfg.RemoteHost = "github"
 			cfg.RemotePrivate = true
+			cfg.RepoName = strings.TrimSpace(m.repoNameInput)
 		case gitRemoteGithubPublic:
 			cfg.RemoteHost = "github"
 			cfg.RemotePrivate = false
+			cfg.RepoName = strings.TrimSpace(m.repoNameInput)
 		case gitRemoteExisting:
 			cfg.RemoteURL = strings.TrimSpace(m.urlInput)
 			cfg.RemoteHost = inferRemoteHost(cfg.RemoteURL)
@@ -222,7 +234,7 @@ func (m GitModel) Done() bool        { return m.done }
 func (m *GitModel) ConsumeDone()     { m.done = false }
 func (m GitModel) IsBack() bool      { return m.backPressed }
 func (m *GitModel) ConsumeBack()     { m.backPressed = false }
-func (m GitModel) IsInputMode() bool { return m.urlEditing }
+func (m GitModel) IsInputMode() bool { return m.urlEditing || m.repoNameEditing }
 
 func (m GitModel) Init() tea.Cmd {
 	return detectGitCmd(m.targetDir)
@@ -250,6 +262,9 @@ func (m GitModel) Update(msg tea.Msg) (GitModel, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.detecting {
 			break
+		}
+		if m.repoNameEditing {
+			return m.handleRepoNameInput(msg)
 		}
 		if m.urlEditing {
 			return m.handleURLInput(msg)
@@ -285,8 +300,16 @@ func (m GitModel) lastField() int {
 
 func (m *GitModel) moveCursor(delta int) {
 	next := m.cursor + delta
-	if next == gitFieldURL && m.remoteOpt != gitRemoteExisting {
-		next += delta
+	for {
+		if next == gitFieldRepoName && (m.remoteOpt != gitRemoteGithubPrivate && m.remoteOpt != gitRemoteGithubPublic) {
+			next += delta
+			continue
+		}
+		if next == gitFieldURL && m.remoteOpt != gitRemoteExisting {
+			next += delta
+			continue
+		}
+		break
 	}
 	first := m.firstField()
 	last := m.lastField()
@@ -308,6 +331,10 @@ func (m *GitModel) cycleOption(delta int) {
 			return
 		}
 		m.remoteOpt = clamp(m.remoteOpt+delta, 0, 3)
+		if (m.remoteOpt == gitRemoteGithubPrivate || m.remoteOpt == gitRemoteGithubPublic) && m.repoNameInput == "" {
+			m.repoNameInput = filepath.Base(m.targetDir)
+			m.repoNameInputPos = len([]rune(m.repoNameInput))
+		}
 	case gitFieldCollab:
 		m.collabOpt = clamp(m.collabOpt+delta, gitCollabNo, gitCollabYes)
 	case gitFieldCI:
@@ -317,6 +344,17 @@ func (m *GitModel) cycleOption(delta int) {
 
 func (m *GitModel) handleEnter() {
 	switch m.cursor {
+	case gitFieldRemote:
+		// When switching to GitHub option, pre-fill repo name from dir
+		if m.remoteOpt == gitRemoteGithubPrivate || m.remoteOpt == gitRemoteGithubPublic {
+			if m.repoNameInput == "" {
+				m.repoNameInput = filepath.Base(m.targetDir)
+				m.repoNameInputPos = len([]rune(m.repoNameInput))
+			}
+		}
+		m.moveCursor(1)
+	case gitFieldRepoName:
+		m.repoNameEditing = true
 	case gitFieldURL:
 		m.urlEditing = true
 	case gitFieldCI:
@@ -324,6 +362,40 @@ func (m *GitModel) handleEnter() {
 	default:
 		m.moveCursor(1)
 	}
+}
+
+func (m GitModel) handleRepoNameInput(msg tea.KeyMsg) (GitModel, tea.Cmd) {
+	runes := []rune(m.repoNameInput)
+	switch msg.String() {
+	case "esc":
+		m.repoNameEditing = false
+	case "enter":
+		m.repoNameEditing = false
+		m.moveCursor(1)
+	case "left":
+		if m.repoNameInputPos > 0 {
+			m.repoNameInputPos--
+		}
+	case "right":
+		if m.repoNameInputPos < len(runes) {
+			m.repoNameInputPos++
+		}
+	case "backspace":
+		if m.repoNameInputPos > 0 {
+			m.repoNameInput = string(append(runes[:m.repoNameInputPos-1], runes[m.repoNameInputPos:]...))
+			m.repoNameInputPos--
+		}
+	case "delete":
+		if m.repoNameInputPos < len(runes) {
+			m.repoNameInput = string(append(runes[:m.repoNameInputPos], runes[m.repoNameInputPos+1:]...))
+		}
+	default:
+		if len(msg.Runes) > 0 {
+			m.repoNameInput = string(append(runes[:m.repoNameInputPos], append(msg.Runes, runes[m.repoNameInputPos:]...)...))
+			m.repoNameInputPos += len(msg.Runes)
+		}
+	}
+	return m, nil
 }
 
 func (m GitModel) handleURLInput(msg tea.KeyMsg) (GitModel, tea.Cmd) {
@@ -399,6 +471,10 @@ func (m GitModel) View() string {
 		sb.WriteString(m.renderRow(gitFieldRemote, "Remote", opts, m.remoteOpt))
 	}
 
+	if (m.remoteOpt == gitRemoteGithubPrivate || m.remoteOpt == gitRemoteGithubPublic) && !(m.hasGit && m.detectedURL != "") {
+		sb.WriteString(m.renderRepoNameRow())
+	}
+
 	if m.remoteOpt == gitRemoteExisting && !(m.hasGit && m.detectedURL != "") {
 		sb.WriteString(m.renderURLRow())
 	}
@@ -410,7 +486,7 @@ func (m GitModel) View() string {
 	sb.WriteString(m.renderRow(gitFieldCI, "CI/CD", ciOpts, m.ciOpt))
 
 	sb.WriteString("\n")
-	if m.urlEditing {
+	if m.urlEditing || m.repoNameEditing {
 		sb.WriteString(styles.MutedStyle.Render("  [←→] move   [↵] confirm   [esc] cancel") + "\n")
 	} else {
 		sb.WriteString(styles.MutedStyle.Render("  [↑↓] field   [←→] option   [↵] next / confirm   [esc] back   [q] quit") + "\n")
@@ -455,6 +531,31 @@ func (m GitModel) renderLockedRow(label, value string) string {
 	return fmt.Sprintf("      %s%s\n",
 		styles.MutedStyle.Render(paddedLabel),
 		styles.SuccessStyle.Render(value),
+	)
+}
+
+func (m GitModel) renderRepoNameRow() string {
+	isFocused := m.cursor == gitFieldRepoName
+	paddedLabel := fmt.Sprintf("%-14s", "Repo name")
+
+	var content string
+	if m.repoNameEditing {
+		content = renderTextInput(m.repoNameInput, m.repoNameInputPos)
+	} else if m.repoNameInput != "" {
+		content = styles.SubtitleStyle.Render(m.repoNameInput)
+	} else {
+		content = styles.DimStyle.Render("enter repo name…")
+	}
+
+	if isFocused {
+		return fmt.Sprintf("%s%s\n",
+			styles.CursorStyle.Render("  ❯❯"),
+			styles.SelectedStyle.Render(" "+paddedLabel)+content,
+		)
+	}
+	return fmt.Sprintf("      %s%s\n",
+		styles.MutedStyle.Render(paddedLabel),
+		content,
 	)
 }
 
