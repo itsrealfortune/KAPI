@@ -1,0 +1,84 @@
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    main: ./main.go
+    binary: kapi
+
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+brews:
+  - name: kapi
+    repository:
+      owner: slouowzee
+      name: homebrew-kapi
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: GoReleaser Bot
+      email: bot@goreleaser.com
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+    directory: Formula
+    homepage: "https://github.com/slouowzee/kapi"
+    description: "A Go-based interactive TUI CLI for project scaffolding"
+    test: |
+      system "#{bin}/kapi --version"
+
+nfpms:
+  - id: kapi
+    file_name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    homepage: "https://github.com/slouowzee/kapi"
+    description: "A Go-based interactive TUI CLI for project scaffolding"
+    maintainer: "slouowzee"
+    license: "MIT"
+    vendor: "slouowzee"
+    formats:
+      - deb
+      - rpm
+      - apk
+      - archlinux
+
+scoops:
+  - name: kapi
+    repository:
+      owner: slouowzee
+      name: scoop-bucket
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: GoReleaser Bot
+      email: bot@goreleaser.com
+    commit_msg_template: "Scoop update for {{ .ProjectName }} version {{ .Tag }}"
+    homepage: "https://github.com/slouowzee/kapi"
+    description: "A Go-based interactive TUI CLI for project scaffolding"
+
