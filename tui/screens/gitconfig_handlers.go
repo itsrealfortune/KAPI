@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -378,7 +379,7 @@ func (m GitConfigModel) handleManageList(msg tea.KeyMsg) (GitConfigModel, tea.Cm
 			m.execMsg = "Pushing key to GitHub..."
 			return m, execGithubPushKeyCmd(m.manageFormat, selected, "KAPI Manage Key")
 		}
-		m.lastErr = fmt.Errorf("missing GitHub scope to push key")
+		m.lastErr = errors.New("missing GitHub scope to push key")
 		m.lastMsg = "Missing GitHub scope (requires write:public_key or write:gpg_key)"
 	}
 	return m, nil

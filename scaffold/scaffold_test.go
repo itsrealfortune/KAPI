@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/slouowzee/kapi/internal/packagemanager"
+	"github.com/slouowzee/kapi/internal/registry"
 	"github.com/slouowzee/kapi/tui/screens"
 )
 
@@ -181,5 +183,181 @@ func TestWriteFileFn_OverwritesExistingFile(t *testing.T) {
 	}
 	if string(content) != "second" {
 		t.Errorf("file content after overwrite = %q, want 'second'", string(content))
+	}
+}
+
+func fw(id string) registry.Framework { return registry.Framework{ID: id, Ecosystem: "php"} }
+
+func TestGithubActionsCI_Laravel_HasEnvCopyAndKeyGenerate(t *testing.T) {
+	out := githubActionsCI(fw("laravel"), packagemanager.NPM)
+	if !strings.Contains(out, "cp .env.example .env") {
+		t.Error("laravel CI should contain 'cp .env.example .env'")
+	}
+	if !strings.Contains(out, "php artisan key:generate") {
+		t.Error("laravel CI should contain 'php artisan key:generate'")
+	}
+	if !strings.Contains(out, "composer test") {
+		t.Error("laravel CI should contain 'composer test'")
+	}
+}
+
+func TestGithubActionsCI_Lumen_HasEnvCopyAndKeyGenerate(t *testing.T) {
+	out := githubActionsCI(fw("lumen"), packagemanager.NPM)
+	if !strings.Contains(out, "cp .env.example .env") {
+		t.Error("lumen CI should contain 'cp .env.example .env'")
+	}
+	if !strings.Contains(out, "php artisan key:generate") {
+		t.Error("lumen CI should contain 'php artisan key:generate'")
+	}
+}
+
+func TestGithubActionsCI_Symfony_NoEnvCopy(t *testing.T) {
+	out := githubActionsCI(fw("symfony"), packagemanager.NPM)
+	if strings.Contains(out, ".env.example") {
+		t.Error("symfony CI must not reference .env.example")
+	}
+	if strings.Contains(out, "key:generate") {
+		t.Error("symfony CI must not run key:generate")
+	}
+	if !strings.Contains(out, "php bin/phpunit") {
+		t.Error("symfony CI should run 'php bin/phpunit'")
+	}
+	if !strings.Contains(out, "APP_ENV=test") {
+		t.Error("symfony CI should set APP_ENV=test")
+	}
+}
+
+func TestGithubActionsCI_ApiPlatform_NoEnvCopy(t *testing.T) {
+	out := githubActionsCI(fw("api-platform"), packagemanager.NPM)
+	if strings.Contains(out, ".env.example") {
+		t.Error("api-platform CI must not reference .env.example")
+	}
+	if !strings.Contains(out, "php bin/phpunit") {
+		t.Error("api-platform CI should run 'php bin/phpunit'")
+	}
+}
+
+func TestGithubActionsCI_CodeIgniter_CopiesEnvFile(t *testing.T) {
+	out := githubActionsCI(fw("codeigniter"), packagemanager.NPM)
+	if strings.Contains(out, ".env.example") {
+		t.Error("codeigniter CI must not reference .env.example")
+	}
+	if !strings.Contains(out, "cp env .env") {
+		t.Error("codeigniter CI should contain 'cp env .env'")
+	}
+	if !strings.Contains(out, "composer test") {
+		t.Error("codeigniter CI should run 'composer test'")
+	}
+}
+
+func TestGithubActionsCI_WordPress_NoTestStep(t *testing.T) {
+	out := githubActionsCI(fw("wordpress"), packagemanager.NPM)
+	if strings.Contains(out, "composer test") {
+		t.Error("wordpress CI should not contain 'composer test'")
+	}
+	if strings.Contains(out, ".env.example") {
+		t.Error("wordpress CI must not reference .env.example")
+	}
+}
+
+func TestGithubActionsCI_VanillaPhp_NoTestStep(t *testing.T) {
+	out := githubActionsCI(fw("vanilla-php"), packagemanager.NPM)
+	if strings.Contains(out, "composer test") {
+		t.Error("vanilla-php CI should not contain 'composer test'")
+	}
+}
+
+func TestGithubActionsCI_GenericPhp_ComposerTest(t *testing.T) {
+	for _, id := range []string{"slim", "yii", "cakephp", "laminas", "drupal", "phalcon", "fuelphp", "leafphp"} {
+		out := githubActionsCI(fw(id), packagemanager.NPM)
+		if !strings.Contains(out, "composer test") {
+			t.Errorf("%s CI should contain 'composer test'", id)
+		}
+		if strings.Contains(out, ".env.example") {
+			t.Errorf("%s CI must not reference .env.example", id)
+		}
+	}
+}
+
+func TestGitlabCI_Laravel_HasEnvCopyAndKeyGenerate(t *testing.T) {
+	out := gitlabCI(fw("laravel"), packagemanager.NPM)
+	if !strings.Contains(out, "cp .env.example .env") {
+		t.Error("laravel gitlab CI should contain 'cp .env.example .env'")
+	}
+	if !strings.Contains(out, "php artisan key:generate") {
+		t.Error("laravel gitlab CI should contain 'php artisan key:generate'")
+	}
+	if !strings.Contains(out, "composer test") {
+		t.Error("laravel gitlab CI should run 'composer test'")
+	}
+}
+
+func TestGitlabCI_Symfony_UsesBinPhpunit(t *testing.T) {
+	out := gitlabCI(fw("symfony"), packagemanager.NPM)
+	if strings.Contains(out, ".env.example") {
+		t.Error("symfony gitlab CI must not reference .env.example")
+	}
+	if !strings.Contains(out, "php bin/phpunit") {
+		t.Error("symfony gitlab CI should run 'php bin/phpunit'")
+	}
+}
+
+func TestGitlabCI_CodeIgniter_CopiesEnvFile(t *testing.T) {
+	out := gitlabCI(fw("codeigniter"), packagemanager.NPM)
+	if !strings.Contains(out, "cp env .env") {
+		t.Error("codeigniter gitlab CI should contain 'cp env .env'")
+	}
+}
+
+func TestGitlabCI_WordPress_NoTestCommand(t *testing.T) {
+	out := gitlabCI(fw("wordpress"), packagemanager.NPM)
+	if strings.Contains(out, "composer test") {
+		t.Error("wordpress gitlab CI should not run 'composer test'")
+	}
+}
+
+func jsfw(id string) registry.Framework { return registry.Framework{ID: id, Ecosystem: "js"} }
+
+func TestGithubActionsCI_JS_NPM_UsesIfPresentAfter(t *testing.T) {
+	out := githubActionsCI(jsfw("nextjs"), packagemanager.NPM)
+	if !strings.Contains(out, "npm run test --if-present") {
+		t.Errorf("npm CI should contain 'npm run test --if-present', got:\n%s", out)
+	}
+	if !strings.Contains(out, "npm run build --if-present") {
+		t.Errorf("npm CI should contain 'npm run build --if-present', got:\n%s", out)
+	}
+}
+
+func TestGithubActionsCI_JS_PNPM_UsesIfPresentBefore(t *testing.T) {
+	out := githubActionsCI(jsfw("nextjs"), packagemanager.PNPM)
+	if !strings.Contains(out, "pnpm run --if-present test") {
+		t.Errorf("pnpm CI should contain 'pnpm run --if-present test', got:\n%s", out)
+	}
+	if strings.Contains(out, "pnpm run test --if-present") {
+		t.Errorf("pnpm CI must not put --if-present after script name, got:\n%s", out)
+	}
+}
+
+func TestGithubActionsCI_JS_Yarn_UsesIfPresentBefore(t *testing.T) {
+	out := githubActionsCI(jsfw("nuxt"), packagemanager.Yarn)
+	if !strings.Contains(out, "yarn run --if-present test") {
+		t.Errorf("yarn CI should contain 'yarn run --if-present test', got:\n%s", out)
+	}
+	if strings.Contains(out, "yarn run test --if-present") {
+		t.Errorf("yarn CI must not put --if-present after script name, got:\n%s", out)
+	}
+}
+
+func TestGithubActionsCI_JS_Bun_UsesIfPresentBefore(t *testing.T) {
+	out := githubActionsCI(jsfw("sveltekit"), packagemanager.Bun)
+	if !strings.Contains(out, "npm run test --if-present") {
+		t.Errorf("bun CI should fallback to npm run test --if-present, got:\n%s", out)
+	}
+}
+
+func TestGitlabCI_JS_PNPM_UsesIfPresentBefore(t *testing.T) {
+	out := gitlabCI(jsfw("express"), packagemanager.PNPM)
+	if !strings.Contains(out, "pnpm run --if-present test") {
+		t.Errorf("pnpm gitlab CI should contain 'pnpm run --if-present test', got:\n%s", out)
 	}
 }

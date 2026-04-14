@@ -178,10 +178,32 @@ func TestCacheKey(t *testing.T) {
 	}
 }
 
+func TestRunIfPresent_FlagPosition(t *testing.T) {
+	cases := []struct {
+		pm     PM
+		script string
+		want   string
+	}{
+		{NPM, "test", "npm run test --if-present"},
+		{NPM, "build", "npm run build --if-present"},
+		{PNPM, "test", "pnpm run --if-present test"},
+		{PNPM, "build", "pnpm run --if-present build"},
+		{Yarn, "test", "yarn run --if-present test"},
+		{Yarn, "build", "yarn run --if-present build"},
+		{Bun, "test", "npm run test --if-present"},
+		{Bun, "build", "npm run build --if-present"},
+		{None, "test", "npm run test --if-present"},
+	}
+	for _, c := range cases {
+		if got := c.pm.RunIfPresent(c.script); got != c.want {
+			t.Errorf("PM(%v).RunIfPresent(%q) = %q, want %q", c.pm, c.script, got, c.want)
+		}
+	}
+}
+
 func TestDetectFromLockfile(t *testing.T) {
 	dir := t.TempDir()
 
-	// No lockfiles → None
 	if got := DetectFromLockfile(dir); got != None {
 		t.Errorf("empty dir: got %v, want None", got)
 	}

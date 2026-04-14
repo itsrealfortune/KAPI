@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -64,27 +65,34 @@ type gitcfgGithubPushDoneMsg struct {
 
 func detectGitConfigCmd(dir string) tea.Cmd {
 	return func() tea.Msg {
-		checkCmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
-		checkCmd.Dir = dir
-		checkOut, checkErr := checkCmd.Output()
-		if checkErr != nil || strings.TrimSpace(string(checkOut)) != "true" {
-			return gitcfgDetectionMsg{hasGit: false}
-		}
-
-		var remoteURL string
-		cmd := exec.Command("git", "remote", "get-url", "origin")
-		cmd.Dir = dir
-		out, err := cmd.Output()
-		if err == nil {
-			remoteURL = strings.TrimSpace(string(out))
-		}
-		return gitcfgDetectionMsg{hasGit: true, remoteURL: remoteURL}
+		hasGit, remoteURL := detectGitInfo(dir)
+		return gitcfgDetectionMsg{hasGit: hasGit, remoteURL: remoteURL}
 	}
+}
+
+func detectGitInfo(dir string) (hasGit bool, remoteURL string) {
+	checkCmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
+	checkCmd.Dir = dir
+	checkOut, checkErr := checkCmd.Output()
+	if checkErr != nil || strings.TrimSpace(string(checkOut)) != "true" {
+		return false, ""
+	}
+
+	hasGit = true
+	cmd := exec.Command("git", "remote", "get-url", "origin")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err == nil {
+		remoteURL = strings.TrimSpace(string(out))
+	}
+	return hasGit, remoteURL
 }
 
 func fetchTokenScopesCmd() tea.Cmd {
 	return func() tea.Msg {
-		scopes, err := config.FetchTokenScopes(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		scopes, err := config.FetchTokenScopes(ctx)
 		return gitcfgScopesMsg{scopes: scopes, err: err}
 	}
 }
@@ -167,7 +175,6 @@ func detectGitSigningCmd(dir string) tea.Cmd {
 	}
 }
 
-
 func runKeyGenCmd(format string) tea.Cmd {
 	var binary string
 	var args []string
@@ -204,7 +211,9 @@ func zeroAndRemove(path string) error {
 	zeros := make([]byte, info.Size())
 	_, _ = f.Write(zeros)
 	_ = f.Sync()
-	f.Close()
+	if err := f.Close(); err != nil {
+		return err
+	}
 	return os.Remove(path)
 }
 
@@ -236,14 +245,17 @@ func execGithubCreateRepoCmd(name string, private bool, dir string) tea.Cmd {
 	return func() tea.Msg {
 		tok := config.GithubToken()
 		if tok == "" {
-			return gitcfgExecMsg{err: fmt.Errorf("GitHub token not found")}
+			return gitcfgExecMsg{err: errors.New("GitHub token not found")}
 		}
 
 		bodyData := map[string]any{
 			"name":    name,
 			"private": private,
 		}
-		reqBody, _ := json.Marshal(bodyData)
+		reqBody, err := json.Marshal(bodyData)
+		if err != nil {
+			return gitcfgExecMsg{err: fmt.Errorf("could not encode GitHub API request body: %w", err)}
+		}
 
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://api.github.com/user/repos", bytes.NewReader(reqBody))
 		if err != nil {
@@ -260,7 +272,10 @@ func execGithubCreateRepoCmd(name string, private bool, dir string) tea.Cmd {
 		}
 		defer resp.Body.Close()
 
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return gitcfgExecMsg{err: fmt.Errorf("could not read GitHub API response: %w", err)}
+		}
 
 		if resp.StatusCode == http.StatusUnprocessableEntity {
 			return gitcfgExecMsg{err: fmt.Errorf("GitHub repo '%s' already exists", name)}
@@ -273,12 +288,12 @@ func execGithubCreateRepoCmd(name string, private bool, dir string) tea.Cmd {
 			SSHUrl string `json:"ssh_url"`
 		}
 		if err := json.Unmarshal(bodyBytes, &result); err != nil {
-			return gitcfgExecMsg{err: fmt.Errorf("failed to parse GitHub response")}
+			return gitcfgExecMsg{err: errors.New("failed to parse GitHub response")}
 		}
 
 		sshUrl := result.SSHUrl
 		if sshUrl == "" {
-			return gitcfgExecMsg{err: fmt.Errorf("no SSH URL in GitHub response")}
+			return gitcfgExecMsg{err: errors.New("no SSH URL in GitHub response")}
 		}
 
 		chk := exec.Command("git", "remote", "get-url", "origin")
@@ -356,7 +371,7 @@ func execGitCollabCmd(dir string, plan collabPlan) tea.Cmd {
 
 		if plan.writeContributing {
 			content := contributingContent()
-			if err := os.WriteFile(filepath.Join(dir, "CONTRIBUTING.md"), []byte(content), 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "CONTRIBUTING.md"), []byte(content), 0o644); err != nil {
 				return gitcfgExecMsg{err: fmt.Errorf("could not write CONTRIBUTING.md: %w", err)}
 			}
 			done = append(done, "CONTRIBUTING.md")
@@ -365,10 +380,10 @@ func execGitCollabCmd(dir string, plan collabPlan) tea.Cmd {
 		ghDir := filepath.Join(dir, ".github")
 
 		if plan.writePRTemplate {
-			if err := os.MkdirAll(ghDir, 0755); err != nil {
+			if err := os.MkdirAll(ghDir, 0o755); err != nil {
 				return gitcfgExecMsg{err: fmt.Errorf("could not create .github directory: %w", err)}
 			}
-			if err := os.WriteFile(filepath.Join(ghDir, "PULL_REQUEST_TEMPLATE.md"), []byte(prTemplateContent()), 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(ghDir, "PULL_REQUEST_TEMPLATE.md"), []byte(prTemplateContent()), 0o644); err != nil {
 				return gitcfgExecMsg{err: fmt.Errorf("could not write PR template: %w", err)}
 			}
 			done = append(done, "PR template")
@@ -376,13 +391,13 @@ func execGitCollabCmd(dir string, plan collabPlan) tea.Cmd {
 
 		if plan.writeIssueTemplates {
 			issueDir := filepath.Join(ghDir, "ISSUE_TEMPLATE")
-			if err := os.MkdirAll(issueDir, 0755); err != nil {
+			if err := os.MkdirAll(issueDir, 0o755); err != nil {
 				return gitcfgExecMsg{err: fmt.Errorf("could not create ISSUE_TEMPLATE directory: %w", err)}
 			}
-			if err := os.WriteFile(filepath.Join(issueDir, "bug_report.md"), []byte(bugReportContent()), 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(issueDir, "bug_report.md"), []byte(bugReportContent()), 0o644); err != nil {
 				return gitcfgExecMsg{err: fmt.Errorf("could not write bug report template: %w", err)}
 			}
-			if err := os.WriteFile(filepath.Join(issueDir, "feature_request.md"), []byte(featureRequestContent()), 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(issueDir, "feature_request.md"), []byte(featureRequestContent()), 0o644); err != nil {
 				return gitcfgExecMsg{err: fmt.Errorf("could not write feature request template: %w", err)}
 			}
 			done = append(done, "Issue templates")
@@ -415,7 +430,10 @@ func execGithubPushKeyCmd(format, key, title string) tea.Cmd {
 				"title": title,
 				"key":   strings.TrimSpace(string(content)),
 			}
-			reqBody, _ = json.Marshal(bodyData)
+			reqBody, err = json.Marshal(bodyData)
+			if err != nil {
+				return gitcfgGithubPushDoneMsg{err: fmt.Errorf("could not encode SSH key request body: %w", err)}
+			}
 		} else {
 			endpoint = "https://api.github.com/user/gpg_keys"
 			cmd := exec.Command("gpg", "--armor", "--export", key)
@@ -427,7 +445,10 @@ func execGithubPushKeyCmd(format, key, title string) tea.Cmd {
 				"name":               title,
 				"armored_public_key": strings.TrimSpace(string(content)),
 			}
-			reqBody, _ = json.Marshal(bodyData)
+			reqBody, err = json.Marshal(bodyData)
+			if err != nil {
+				return gitcfgGithubPushDoneMsg{err: fmt.Errorf("could not encode GPG key request body: %w", err)}
+			}
 		}
 
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, endpoint, bytes.NewReader(reqBody))

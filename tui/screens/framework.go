@@ -416,21 +416,23 @@ func levenshtein(a, b string) int {
 		return la
 	}
 
-	prev := make([]int, lb+1)
-	curr := make([]int, lb+1)
+	row := make([]int, lb+1)
 	for j := 0; j <= lb; j++ {
-		prev[j] = j
+		row[j] = j
 	}
+
 	for i := 1; i <= la; i++ {
-		curr[0] = i
+		prevDiag := row[0]
+		row[0] = i
 		for j := 1; j <= lb; j++ {
+			prevDiagTemp := row[j]
 			cost := 1
 			if ra[i-1] == rb[j-1] {
 				cost = 0
 			}
-			curr[j] = min(curr[j-1]+1, prev[j]+1, prev[j-1]+cost)
+			row[j] = min(row[j-1]+1, row[j]+1, prevDiag+cost)
+			prevDiag = prevDiagTemp
 		}
-		prev, curr = curr, prev
 	}
-	return prev[lb]
+	return row[lb]
 }

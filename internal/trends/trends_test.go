@@ -8,18 +8,16 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/slouowzee/kapi/internal/testutil"
 )
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func redirectTo(t *testing.T, ts *httptest.Server) {
 	t.Helper()
 	orig := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = orig })
 	inner := orig
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	http.DefaultTransport = testutil.RoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		req2 := req.Clone(req.Context())
 		req2.URL.Scheme = "http"
 		req2.URL.Host = ts.Listener.Addr().String()

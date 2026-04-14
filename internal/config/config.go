@@ -3,12 +3,14 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func GithubToken() string {
@@ -30,7 +32,7 @@ type TokenScopes struct {
 func FetchTokenScopes(ctx context.Context) (TokenScopes, error) {
 	tok := GithubToken()
 	if tok == "" {
-		return TokenScopes{}, fmt.Errorf("no GitHub token configured")
+		return TokenScopes{}, errors.New("no GitHub token configured")
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user", nil)
@@ -40,7 +42,8 @@ func FetchTokenScopes(ctx context.Context) (TokenScopes, error) {
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Accept", "application/vnd.github+json")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return TokenScopes{}, fmt.Errorf("fetch GitHub scopes: %w", err)
 	}
@@ -52,7 +55,7 @@ func FetchTokenScopes(ctx context.Context) (TokenScopes, error) {
 
 	raw := resp.Header.Get("X-OAuth-Scopes")
 	if raw == "" {
-		return TokenScopes{}, fmt.Errorf("GitHub token missing required scopes")
+		return TokenScopes{}, errors.New("GitHub token missing required scopes")
 	}
 
 	var s TokenScopes
@@ -100,7 +103,7 @@ func Save(cfg Config) error {
 	}
 
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 
@@ -109,7 +112,7 @@ func Save(cfg Config) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0600)
+	return os.WriteFile(path, data, 0o600)
 }
 
 func configPath() (string, error) {

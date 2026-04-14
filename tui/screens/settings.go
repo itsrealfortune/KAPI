@@ -2,6 +2,7 @@ package screens
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,8 +14,8 @@ import (
 type settingsStep int
 
 const (
-	SETTINGS_STEP_MENU settingsStep = iota
-	SETTINGS_STEP_PM
+	SettingsStepMenu settingsStep = iota
+	SettingsStepPM
 )
 
 type settingsSavedMsg struct{ err error }
@@ -57,11 +58,14 @@ type SettingsModel struct {
 }
 
 func NewSettings(width, height int) SettingsModel {
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "kapi: warning: could not load config: %v\n", err)
+	}
 	return SettingsModel{
 		width:     width,
 		height:    height,
-		step:      SETTINGS_STEP_MENU,
+		step:      SettingsStepMenu,
 		currentPM: packagemanager.Parse(cfg.PackageManager),
 	}
 }
@@ -103,13 +107,13 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 				m.lastMsg = "Saved."
 			}
 		}
-		m.step = SETTINGS_STEP_MENU
+		m.step = SettingsStepMenu
 
 	case tea.KeyMsg:
 		switch m.step {
-		case SETTINGS_STEP_MENU:
+		case SettingsStepMenu:
 			return m.handleMenuKey(msg)
-		case SETTINGS_STEP_PM:
+		case SettingsStepPM:
 			return m.handlePMKey(msg)
 		}
 	}
@@ -128,7 +132,7 @@ func (m SettingsModel) handleMenuKey(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 		m.lastMsg = ""
 		m.lastErr = nil
 		m.pmCursor = m.pmCursorFor(m.currentPM)
-		m.step = SETTINGS_STEP_PM
+		m.step = SettingsStepPM
 	}
 	return m, nil
 }
@@ -139,7 +143,7 @@ func (m SettingsModel) handlePMKey(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 	case "esc":
 		m.lastMsg = ""
 		m.lastErr = nil
-		m.step = SETTINGS_STEP_MENU
+		m.step = SettingsStepMenu
 	case "up", "k":
 		if m.pmCursor > 0 {
 			m.pmCursor--
@@ -177,7 +181,7 @@ func (m SettingsModel) pmCursorFor(pm packagemanager.PM) int {
 
 func (m SettingsModel) View() string {
 	switch m.step {
-	case SETTINGS_STEP_PM:
+	case SettingsStepPM:
 		return m.viewPM()
 	default:
 		return m.viewMenu()

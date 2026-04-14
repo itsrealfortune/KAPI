@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -36,10 +35,8 @@ type gitDetectWelcomeMsg struct{ hasGit bool }
 
 func detectGitWelcomeCmd(dir string) tea.Cmd {
 	return func() tea.Msg {
-		cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
-		cmd.Dir = dir
-		out, err := cmd.Output()
-		return gitDetectWelcomeMsg{hasGit: err == nil && strings.TrimSpace(string(out)) == "true"}
+		hasGit, _ := detectGitInfo(dir)
+		return gitDetectWelcomeMsg{hasGit: hasGit}
 	}
 }
 

@@ -8,21 +8,36 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/slouowzee/kapi/internal/gitconfig"
 	"github.com/slouowzee/kapi/tui/styles"
 )
 
+type GitConfig = gitconfig.GitConfig
+
 const (
 	gitFieldInit     = 0
-	gitFieldRemote   = 1
-	gitFieldRepoName = 2
-	gitFieldURL      = 3
-	gitFieldCollab   = 4
-	gitFieldCI       = 5
+	gitFieldIgnore   = 1
+	gitFieldCommit   = 2
+	gitFieldRemote   = 3
+	gitFieldRepoName = 4
+	gitFieldURL      = 5
+	gitFieldCollab   = 6
+	gitFieldCI       = 7
 )
 
 const (
 	gitInitNo  = 0
 	gitInitYes = 1
+)
+
+const (
+	gitIgnoreNo  = 0
+	gitIgnoreYes = 1
+)
+
+const (
+	gitCommitNo  = 0
+	gitCommitYes = 1
 )
 
 const (
@@ -67,18 +82,6 @@ func existingAncestor(dir string) string {
 	}
 }
 
-type GitConfig struct {
-	InitLocal      bool
-	HasExistingGit bool
-
-	RemoteURL     string
-	RemoteHost    string
-	RemotePrivate bool
-	RepoName      string
-	Collab        bool
-	CI            string
-}
-
 type gitDetectionMsg struct {
 	hasGit    bool
 	remoteURL string
@@ -121,6 +124,8 @@ type GitModel struct {
 	cursor int
 
 	initOpt   int
+	ignoreOpt int
+	commitOpt int
 	remoteOpt int
 	collabOpt int
 	ciOpt     int
@@ -157,6 +162,16 @@ func Git(width, height int, targetDir string, cfg GitConfig) GitModel {
 	}
 	if cfg.InitLocal {
 		m.initOpt = gitInitYes
+	}
+	if cfg.UniversalGitignore {
+		m.ignoreOpt = gitIgnoreYes
+	}
+	if cfg.InitialCommit {
+		m.commitOpt = gitCommitYes
+	} else {
+		// Par défaut à Yes si rien n'est précisé, ou en fonction des préférences passées
+		// Mais comme Config() est vide lors du premier passage, on initialise à gitCommitYes lors du reset local
+		m.commitOpt = gitCommitYes
 	}
 	switch {
 	case cfg.HasExistingGit && cfg.RemoteURL != "":
@@ -197,9 +212,11 @@ func (m *GitModel) SetSize(width, height int) {
 
 func (m GitModel) Config() GitConfig {
 	cfg := GitConfig{
-		InitLocal:      m.initOpt == gitInitYes,
-		HasExistingGit: m.hasGit,
-		Collab:         m.collabOpt == gitCollabYes,
+		InitLocal:          m.initOpt == gitInitYes,
+		UniversalGitignore: m.ignoreOpt == gitIgnoreYes,
+		InitialCommit:      m.commitOpt == gitCommitYes,
+		HasExistingGit:     m.hasGit,
+		Collab:             m.collabOpt == gitCollabYes,
 	}
 	switch m.ciOpt {
 	case gitCIGitHub:
@@ -301,6 +318,10 @@ func (m GitModel) lastField() int {
 func (m *GitModel) moveCursor(delta int) {
 	next := m.cursor + delta
 	for {
+		if (next == gitFieldIgnore || next == gitFieldCommit) && m.initOpt == gitInitNo {
+			next += delta
+			continue
+		}
 		if next == gitFieldRepoName && (m.remoteOpt != gitRemoteGithubPrivate && m.remoteOpt != gitRemoteGithubPublic) {
 			next += delta
 			continue
@@ -326,6 +347,10 @@ func (m *GitModel) cycleOption(delta int) {
 	switch m.cursor {
 	case gitFieldInit:
 		m.initOpt = clamp(m.initOpt+delta, gitInitNo, gitInitYes)
+	case gitFieldIgnore:
+		m.ignoreOpt = clamp(m.ignoreOpt+delta, gitIgnoreNo, gitIgnoreYes)
+	case gitFieldCommit:
+		m.commitOpt = clamp(m.commitOpt+delta, gitCommitNo, gitCommitYes)
 	case gitFieldRemote:
 		if m.hasGit && m.detectedURL != "" {
 			return
@@ -462,6 +487,12 @@ func (m GitModel) View() string {
 	} else {
 		opts := []string{"No", "Yes"}
 		sb.WriteString(m.renderRow(gitFieldInit, "Local repo", opts, m.initOpt))
+		if m.initOpt == gitInitYes {
+			ignoreOpts := []string{"Keep defaults", "Generate universal (safe .env)"}
+			sb.WriteString(m.renderRow(gitFieldIgnore, ".gitignore", ignoreOpts, m.ignoreOpt))
+			commitOpts := []string{"No", "Yes"}
+			sb.WriteString(m.renderRow(gitFieldCommit, "Init commit", commitOpts, m.commitOpt))
+		}
 	}
 
 	if m.hasGit && m.detectedURL != "" {

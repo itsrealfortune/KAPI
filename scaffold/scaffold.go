@@ -10,11 +10,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/slouowzee/kapi/internal/gitconfig"
 	"github.com/slouowzee/kapi/internal/packagemanager"
 	"github.com/slouowzee/kapi/internal/packages"
 	"github.com/slouowzee/kapi/internal/registry"
-	"github.com/slouowzee/kapi/tui/screens"
 )
 
 type Step struct {
@@ -28,7 +29,7 @@ func Plan(
 	targetDir string,
 	fw registry.Framework,
 	selectedPkgs []packages.Package,
-	gitCfg screens.GitConfig,
+	gitCfg gitconfig.GitConfig,
 	pm packagemanager.PM,
 ) []Step {
 	var steps []Step
@@ -52,13 +53,21 @@ func Plan(
 
 	switch gitCfg.CI {
 	case "github":
-		steps = append(steps, ciGithubStep(targetDir, fw.Ecosystem, pm))
+		steps = append(steps, ciGithubStep(targetDir, fw, pm))
 	case "gitlab":
-		steps = append(steps, ciGitlabStep(targetDir, fw.Ecosystem, pm))
+		steps = append(steps, ciGitlabStep(targetDir, fw, pm))
 	}
 
 	if gitCfg.InitLocal && !gitCfg.HasExistingGit {
-		steps = append(steps, initialCommitStep(targetDir))
+		if gitCfg.UniversalGitignore {
+			steps = append(steps, Step{
+				Label: "write universal .gitignore",
+				Fn:    writeFileFn(targetDir, ".gitignore", universalGitignore),
+			})
+		}
+		if gitCfg.InitialCommit {
+			steps = append(steps, initialCommitStep(targetDir))
+		}
 	}
 
 	steps = append(steps, remoteSteps(targetDir, gitCfg)...)
@@ -66,7 +75,7 @@ func Plan(
 	return steps
 }
 
-func remoteSteps(targetDir string, gitCfg screens.GitConfig) []Step {
+func remoteSteps(targetDir string, gitCfg gitconfig.GitConfig) []Step {
 	switch gitCfg.RemoteHost {
 	case "github":
 		name := gitCfg.RepoName
@@ -85,7 +94,9 @@ func remoteSteps(targetDir string, gitCfg screens.GitConfig) []Step {
 			{
 				Label: "create " + visibility + " GitHub repo: " + name,
 				Fn: func() error {
-					url, err := createGithubRepo(context.Background(), name, private)
+					ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+					defer cancel()
+					url, err := createGithubRepo(ctx, name, private)
 					if err != nil {
 						return err
 					}
@@ -234,6 +245,7 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 		return jsExecStreamStep(parent, pm, "@nestjs/cli@latest", "new", name, "--package-manager", pm.String())
 	case "expo":
 		return jsExecStreamStep(parent, pm, "create-expo-app@latest", name)
+	default:
 	}
 
 	return []Step{{
@@ -243,19 +255,19 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 }
 
 func jsExecStep(dir string, pm packagemanager.PM, pkg string, extra ...string) []Step {
-	argv := append(pm.ExecArgs(), pkg)
+	argv := append(append([]string(nil), pm.ExecArgs()...), pkg)
 	argv = append(argv, extra...)
 	return []Step{{Label: strings.Join(argv, " "), Cmd: cmdSlice(dir, argv)}}
 }
 
 func jsExecStreamStep(dir string, pm packagemanager.PM, pkg string, extra ...string) []Step {
-	argv := append(pm.ExecArgs(), pkg)
+	argv := append(append([]string(nil), pm.ExecArgs()...), pkg)
 	argv = append(argv, extra...)
 	return []Step{{Label: strings.Join(argv, " "), StreamFn: streamCmdSlice(dir, argv)}}
 }
 
 func jsCreateStreamStep(dir string, pm packagemanager.PM, pkg string, extra ...string) []Step {
-	argv := append(pm.CreateArgs(), pkg)
+	argv := append(append([]string(nil), pm.CreateArgs()...), pkg)
 	argv = append(argv, extra...)
 	return []Step{{Label: strings.Join(argv, " "), StreamFn: streamCmdSlice(dir, argv)}}
 }
@@ -296,7 +308,7 @@ func packageSteps(targetDir string, fw registry.Framework, pkgs []packages.Packa
 			StreamFn: streamCmdSlice(targetDir, append([]string{"composer"}, args...)),
 		}}
 	}
-	argv := append(pm.InstallArgs(), names...)
+	argv := append(append([]string(nil), pm.InstallArgs()...), names...)
 	return []Step{{
 		Label:    strings.Join(argv, " "),
 		StreamFn: streamCmdSlice(targetDir, argv),
@@ -328,18 +340,18 @@ func collabSteps(targetDir string) []Step {
 	}
 }
 
-func ciGithubStep(targetDir, ecosystem string, pm packagemanager.PM) Step {
+func ciGithubStep(targetDir string, fw registry.Framework, pm packagemanager.PM) Step {
 	path := filepath.Join(".github", "workflows", "ci.yml")
 	return Step{
 		Label: "write " + path,
-		Fn:    writeFileFn(targetDir, path, githubActionsCI(ecosystem, pm)),
+		Fn:    writeFileFn(targetDir, path, githubActionsCI(fw, pm)),
 	}
 }
 
-func ciGitlabStep(targetDir, ecosystem string, pm packagemanager.PM) Step {
+func ciGitlabStep(targetDir string, fw registry.Framework, pm packagemanager.PM) Step {
 	return Step{
 		Label: "write .gitlab-ci.yml",
-		Fn:    writeFileFn(targetDir, ".gitlab-ci.yml", gitlabCI(ecosystem, pm)),
+		Fn:    writeFileFn(targetDir, ".gitlab-ci.yml", gitlabCI(fw, pm)),
 	}
 }
 
@@ -439,8 +451,6 @@ func initialCommitStep(targetDir string) Step {
 			if err := addCmd.Run(); err != nil {
 				return err
 			}
-			// If the scaffolder already committed (e.g. create-next-app),
-			// skip to avoid an empty or redundant commit.
 			statusCmd := exec.Command("git", "status", "--porcelain")
 			statusCmd.Dir = targetDir
 			out, err := statusCmd.Output()
@@ -516,9 +526,100 @@ const featureTemplate = "---\n" +
 	"## Proposed solution\n\n" +
 	"## Alternatives considered\n"
 
-func githubActionsCI(ecosystem string, pm packagemanager.PM) string {
-	if ecosystem == "php" {
-		return `name: CI
+const universalGitignore = `# Environment variables
+.env
+.env.*
+!.env.example
+!.env.test
+
+# Dependencies
+node_modules/
+vendor/
+
+# Build outputs
+/dist/
+/build/
+/.next/
+/.nuxt/
+/.output/
+/.svelte-kit/
+/.angular/
+/out/
+public/build/
+var/cache/
+var/log/
+
+# Caches
+.cache/
+.eslintcache
+.tsbuildinfo
+.phpunit.result.cache
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# Coverage
+coverage/
+`
+
+func githubActionsCI(fw registry.Framework, pm packagemanager.PM) string {
+	if fw.Ecosystem == "php" {
+		return githubActionsCIPhp(fw.ID)
+	}
+
+	var setupSteps string
+	if pm.String() == "bun" {
+		setupSteps = `      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest`
+	} else if pm.String() == "pnpm" {
+		setupSteps = `      - uses: pnpm/action-setup@v3
+        with:
+          version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'`
+	} else {
+		setupSteps = fmt.Sprintf(`      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: '%s'`, pm.CacheKey())
+	}
+
+	return fmt.Sprintf(`name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+%s
+      - run: %s
+      - run: %s
+      - run: %s
+`, setupSteps, pm.CIInstall(), pm.RunIfPresent("test"), pm.RunIfPresent("build"))
+}
+
+func githubActionsCIPhp(fwID string) string {
+	const header = `name: CI
 
 on:
   push:
@@ -532,51 +633,47 @@ jobs:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          php-version: '8.5'
       - run: composer install --prefer-dist --no-progress
-      - run: composer test
 `
+	switch fwID {
+	case "laravel", "lumen":
+		return header +
+			"      - run: cp .env.example .env\n" +
+			"      - run: php artisan key:generate\n" +
+			"      - run: composer test\n"
+	case "symfony", "api-platform":
+		return header +
+			"      - run: APP_ENV=test php bin/phpunit\n"
+	case "codeigniter":
+		return header +
+			"      - run: cp env .env\n" +
+			"      - run: composer test\n"
+	case "wordpress", "vanilla-php":
+		return header
+	default:
+		return header +
+			"      - run: composer test\n"
 	}
-	return fmt.Sprintf(`name: CI
-
-on:
-  push:
-    branches: [main, dev]
-  pull_request:
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: '%s'
-      - run: %s
-      - run: %s test --if-present
-      - run: %s build --if-present
-`, pm.CacheKey(), pm.CIInstall(), pm.RunScript(), pm.RunScript())
 }
 
-func gitlabCI(ecosystem string, pm packagemanager.PM) string {
-	if ecosystem == "php" {
-		return `image: php:8.3
-
-stages:
-  - test
-
-test:
-  stage: test
-  before_script:
-    - apt-get update -qq && apt-get install -y -qq git unzip
-    - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
-    - composer install --prefer-dist --no-progress
-  script:
-    - composer test
-`
+func gitlabCI(fw registry.Framework, pm packagemanager.PM) string {
+	if fw.Ecosystem == "php" {
+		return gitlabCIPhp(fw.ID)
 	}
-	return fmt.Sprintf(`image: node:20
+
+	var beforeScript string
+	if pm.String() == "bun" {
+		beforeScript = `    - npm install -g bun
+    - ` + pm.CIInstall()
+	} else if pm.String() == "pnpm" {
+		beforeScript = `    - npm install -g pnpm
+    - ` + pm.CIInstall()
+	} else {
+		beforeScript = `    - ` + pm.CIInstall()
+	}
+
+	return fmt.Sprintf(`image: node:24
 
 stages:
   - test
@@ -587,9 +684,49 @@ test:
     paths:
       - node_modules/
   before_script:
-    - %s
+%s
   script:
-    - %s test --if-present
-    - %s build --if-present
-`, pm.CIInstall(), pm.RunScript(), pm.RunScript())
+    - %s
+    - %s
+`, beforeScript, pm.RunIfPresent("test"), pm.RunIfPresent("build"))
+}
+
+func gitlabCIPhp(fwID string) string {
+	const header = `image: php:8.5
+
+stages:
+  - test
+
+test:
+  stage: test
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git unzip
+    - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+    - composer install --prefer-dist --no-progress
+`
+	switch fwID {
+	case "laravel", "lumen":
+		return header +
+			"    - cp .env.example .env\n" +
+			"    - php artisan key:generate\n" +
+			"  script:\n" +
+			"    - composer test\n"
+	case "symfony", "api-platform":
+		return header +
+			"  script:\n" +
+			"    - APP_ENV=test php bin/phpunit\n"
+	case "codeigniter":
+		return header +
+			"    - cp env .env\n" +
+			"  script:\n" +
+			"    - composer test\n"
+	case "wordpress", "vanilla-php":
+		return header +
+			"  script:\n" +
+			"    - echo \"No tests configured\"\n"
+	default:
+		return header +
+			"  script:\n" +
+			"    - composer test\n"
+	}
 }

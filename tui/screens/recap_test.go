@@ -140,3 +140,11 @@ func TestGitValue_ExistingGit_NoRemote_IsNone(t *testing.T) {
 		t.Errorf("gitValue() = %q, want none when only HasExistingGit and no remote", got)
 	}
 }
+
+func TestGitValue_UniversalGitignore(t *testing.T) {
+	cfg := GitConfig{InitLocal: true, UniversalGitignore: true}
+	got := gitValue(cfg)
+	if !strings.Contains(got, "universal gitignore") {
+		t.Errorf("gitValue() = %q, want to contain 'universal gitignore'", got)
+	}
+}

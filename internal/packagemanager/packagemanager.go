@@ -124,6 +124,21 @@ func (pm PM) RunScript() string {
 	}
 }
 
+func (pm PM) RunIfPresent(script string) string {
+	switch pm {
+	case NPM:
+		return "npm run " + script + " --if-present"
+	case PNPM:
+		return "pnpm run --if-present " + script
+	case Yarn:
+		return "yarn run --if-present " + script
+	case Bun:
+		return "npm run " + script + " --if-present"
+	default:
+		return "npm run " + script + " --if-present"
+	}
+}
+
 func (pm PM) CacheKey() string {
 	switch pm {
 	case PNPM:

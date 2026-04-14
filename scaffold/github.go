@@ -4,20 +4,27 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/slouowzee/kapi/internal/config"
 )
 
+const githubClientTimeout = 15 * time.Second
+
 func createGithubRepo(ctx context.Context, name string, private bool) (sshURL string, err error) {
 	tok := config.GithubToken()
 	if tok == "" {
-		return "", fmt.Errorf("GitHub token not configured — run: kapi config github.token <token>")
+		return "", errors.New("GitHub token not configured — run: kapi config github.token <token>")
 	}
 
-	body, _ := json.Marshal(map[string]any{"name": name, "private": private})
+	body, err := json.Marshal(map[string]any{"name": name, "private": private})
+	if err != nil {
+		return "", fmt.Errorf("could not encode GitHub API request body: %w", err)
+	}
 	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.github.com/user/repos", bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("could not build GitHub API request: %w", err)
@@ -26,13 +33,16 @@ func createGithubRepo(ctx context.Context, name string, private bool) (sshURL st
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: githubClientTimeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("GitHub API request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	respBytes, _ := io.ReadAll(resp.Body)
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("could not read GitHub API response: %w", err)
+	}
 
 	if resp.StatusCode == http.StatusUnprocessableEntity {
 		return "", fmt.Errorf("GitHub repo %q already exists", name)
@@ -45,7 +55,7 @@ func createGithubRepo(ctx context.Context, name string, private bool) (sshURL st
 		SSHUrl string `json:"ssh_url"`
 	}
 	if err := json.Unmarshal(respBytes, &result); err != nil || result.SSHUrl == "" {
-		return "", fmt.Errorf("could not parse SSH URL from GitHub response")
+		return "", errors.New("could not parse SSH URL from GitHub response")
 	}
 	return result.SSHUrl, nil
 }

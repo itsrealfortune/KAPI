@@ -248,6 +248,12 @@ func (m RecapModel) gitValue() string {
 	if m.gitCfg.InitLocal || m.gitCfg.HasExistingGit {
 		parts = append(parts, "local")
 	}
+	if m.gitCfg.UniversalGitignore {
+		parts = append(parts, "universal gitignore")
+	}
+	if m.gitCfg.InitialCommit {
+		parts = append(parts, "initial commit")
+	}
 	switch m.gitCfg.RemoteHost {
 	case "github":
 		v := "github"

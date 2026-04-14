@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/slouowzee/kapi/internal/semver"
+	"golang.org/x/sync/singleflight"
 )
 
 const fetchTimeout = 5 * time.Second
@@ -25,6 +27,7 @@ type starsEntry struct {
 var (
 	starsCacheMu sync.Mutex
 	starsCache   = make(map[string]starsEntry)
+	starsGroup   singleflight.Group
 )
 
 type Stats struct {
@@ -61,8 +64,10 @@ func Fetch(ctx context.Context, npmPackage, packagistPackage, githubRepo string,
 
 	if githubRepo != "" {
 		stars, err := fetchGithubStars(ctx, githubRepo, githubToken)
-		if err != nil && stats.Err == nil {
-			stats.Err = err
+		if err != nil {
+			if stats.Err == nil {
+				stats.Err = err
+			}
 		} else {
 			stats.Stars = stars
 		}
@@ -72,7 +77,7 @@ func Fetch(ctx context.Context, npmPackage, packagistPackage, githubRepo string,
 }
 
 func fetchNpm(ctx context.Context, pkg string) (int64, string, error) {
-	encoded := strings.ReplaceAll(pkg, "/", "%2F")
+	encoded := url.PathEscape(pkg)
 
 	dlURL := fmt.Sprintf("https://api.npmjs.org/downloads/point/last-week/%s", encoded)
 	var dlResp struct {
@@ -123,6 +128,10 @@ func fetchPackagist(ctx context.Context, pkg string) (int64, string, error) {
 }
 
 func fetchGithubStars(ctx context.Context, repo string, token string) (int64, error) {
+	return FetchStars(ctx, repo, token)
+}
+
+func FetchStars(ctx context.Context, repo string, token string) (int64, error) {
 	starsCacheMu.Lock()
 	if entry, ok := starsCache[repo]; ok && time.Since(entry.fetchedAt) < starsCacheTTL {
 		starsCacheMu.Unlock()
@@ -130,40 +139,47 @@ func fetchGithubStars(ctx context.Context, repo string, token string) (int64, er
 	}
 	starsCacheMu.Unlock()
 
-	url := fmt.Sprintf("https://api.github.com/repos/%s", repo)
+	v, err, _ := starsGroup.Do(repo, func() (interface{}, error) {
+		url := fmt.Sprintf("https://api.github.com/repos/%s", repo)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return int64(0), err
+		}
+		req.Header.Set("User-Agent", "kapi-cli")
+		req.Header.Set("Accept", "application/json")
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return int64(0), err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return int64(0), fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+		}
+
+		var payload struct {
+			Stars int64 `json:"stargazers_count"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			return int64(0), err
+		}
+
+		starsCacheMu.Lock()
+		starsCache[repo] = starsEntry{stars: payload.Stars, fetchedAt: time.Now()}
+		starsCacheMu.Unlock()
+
+		return payload.Stars, nil
+	})
+
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("User-Agent", "kapi-cli")
-	req.Header.Set("Accept", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
-	}
-
-	var payload struct {
-		Stars int64 `json:"stargazers_count"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return 0, err
-	}
-
-	starsCacheMu.Lock()
-	starsCache[repo] = starsEntry{stars: payload.Stars, fetchedAt: time.Now()}
-	starsCacheMu.Unlock()
-
-	return payload.Stars, nil
+	return v.(int64), nil
 }
 
 func getJSON(ctx context.Context, url string, dest any) error {

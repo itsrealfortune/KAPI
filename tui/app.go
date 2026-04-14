@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 
@@ -17,17 +18,17 @@ import (
 type Screen int
 
 const (
-	SCREEN_WELCOME Screen = iota
-	SCREEN_FOLDER
-	SCREEN_ECOSYSTEM
-	SCREEN_FRAMEWORK
-	SCREEN_PACKAGES
-	SCREEN_GIT
-	SCREEN_PM_SELECT
-	SCREEN_RECAP
-	SCREEN_GIT_CONFIG
-	SCREEN_SETTINGS
-	SCREEN_EXEC
+	ScreenWelcome Screen = iota
+	ScreenFolder
+	ScreenEcosystem
+	ScreenFramework
+	ScreenPackages
+	ScreenGit
+	ScreenPMSelect
+	ScreenRecap
+	ScreenGitConfig
+	ScreenSettings
+	ScreenExec
 )
 
 type App struct {
@@ -59,9 +60,12 @@ type App struct {
 }
 
 func New() App {
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "kapi: warning: could not load config: %v\n", err)
+	}
 	return App{
-		screen:     SCREEN_WELCOME,
+		screen:     ScreenWelcome,
 		welcome:    screens.NewWelcome(0, 0),
 		selectedPM: packagemanager.Parse(cfg.PackageManager),
 	}
@@ -77,27 +81,27 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		switch a.screen {
-		case SCREEN_WELCOME:
+		case ScreenWelcome:
 			a.welcome.SetSize(msg.Width, msg.Height)
-		case SCREEN_FOLDER:
+		case ScreenFolder:
 			a.folder.SetSize(msg.Width, msg.Height)
-		case SCREEN_ECOSYSTEM:
+		case ScreenEcosystem:
 			a.ecosystem.SetSize(msg.Width, msg.Height)
-		case SCREEN_FRAMEWORK:
+		case ScreenFramework:
 			a.framework.SetSize(msg.Width, msg.Height)
-		case SCREEN_PACKAGES:
+		case ScreenPackages:
 			a.packages.SetSize(msg.Width, msg.Height)
-		case SCREEN_GIT:
+		case ScreenGit:
 			a.git.SetSize(msg.Width, msg.Height)
-		case SCREEN_PM_SELECT:
+		case ScreenPMSelect:
 			a.pmSelect.SetSize(msg.Width, msg.Height)
-		case SCREEN_RECAP:
+		case ScreenRecap:
 			a.recap.SetSize(msg.Width, msg.Height)
-		case SCREEN_GIT_CONFIG:
+		case ScreenGitConfig:
 			a.gitConfig.SetSize(msg.Width, msg.Height)
-		case SCREEN_SETTINGS:
+		case ScreenSettings:
 			a.settings.SetSize(msg.Width, msg.Height)
-		case SCREEN_EXEC:
+		case ScreenExec:
 			a.exec.SetSize(msg.Width, msg.Height)
 		}
 
@@ -106,22 +110,22 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			return a, tea.Quit
 		case "q":
-			if a.screen == SCREEN_FOLDER && a.folder.IsInputMode() {
+			if a.screen == ScreenFolder && a.folder.IsInputMode() {
 				break
 			}
-			if a.screen == SCREEN_GIT && a.git.IsInputMode() {
+			if a.screen == ScreenGit && a.git.IsInputMode() {
 				break
 			}
-			if a.screen == SCREEN_GIT_CONFIG && a.gitConfig.IsInputMode() {
+			if a.screen == ScreenGitConfig && a.gitConfig.IsInputMode() {
 				break
 			}
-			if a.screen == SCREEN_FRAMEWORK || a.screen == SCREEN_PACKAGES {
+			if a.screen == ScreenFramework || a.screen == ScreenPackages {
 				break
 			}
-			if a.screen == SCREEN_PM_SELECT {
+			if a.screen == ScreenPMSelect {
 				break
 			}
-			if a.screen == SCREEN_RECAP && a.recap.IsAbandonPending() {
+			if a.screen == ScreenRecap && a.recap.IsAbandonPending() {
 				break
 			}
 			return a, tea.Quit
@@ -129,25 +133,25 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch a.screen {
-	case SCREEN_WELCOME:
+	case ScreenWelcome:
 		updated, cmd := a.welcome.Update(msg)
 		a.welcome = updated
 
 		if updated.IsNewProjectSelected() {
 			a.welcome.ConsumeEnter()
-			a.screen = SCREEN_FOLDER
+			a.screen = ScreenFolder
 			a.folder = screens.Folder(a.width, a.height, "")
 			return a, a.folder.Init()
 		}
 		if updated.IsGitConfigSelected() {
 			a.welcome.ConsumeEnter()
-			a.screen = SCREEN_GIT_CONFIG
+			a.screen = ScreenGitConfig
 			a.gitConfig = screens.NewGitConfig(a.width, a.height, updated.WorkDir())
 			return a, a.gitConfig.Init()
 		}
 		if updated.IsSettingsSelected() {
 			a.welcome.ConsumeEnter()
-			a.screen = SCREEN_SETTINGS
+			a.screen = ScreenSettings
 			a.settings = screens.NewSettings(a.width, a.height)
 			return a, a.settings.Init()
 		}
@@ -158,7 +162,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.selectedDir = updated.WorkDir()
 			a.selectedFramework = fw
 			a.browseMode = true
-			a.screen = SCREEN_PACKAGES
+			a.screen = ScreenPackages
 			a.packages = screens.NewPackages(a.width, a.height, fw, a.selectedDir)
 			return a, a.packages.Init()
 		}
@@ -170,7 +174,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			installCmd := execCmd("", "go", "install",
 				"github.com/slouowzee/kapi@"+latest)
-			a.screen = SCREEN_EXEC
+			a.screen = ScreenExec
 			a.exec = screens.NewExec(a.width, a.height, []screens.ExecStep{{
 				Label: "go install github.com/slouowzee/kapi@" + latest,
 				Cmd:   installCmd,
@@ -179,7 +183,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, cmd
 
-	case SCREEN_FOLDER:
+	case ScreenFolder:
 		updated, cmd := a.folder.Update(msg)
 		a.folder = updated
 
@@ -189,7 +193,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.editMode = false
 				return a.goToRecap()
 			}
-			a.screen = SCREEN_WELCOME
+			a.screen = ScreenWelcome
 			return a, nil
 		}
 		if updated.Done() {
@@ -199,13 +203,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.editMode = false
 				return a.goToRecap()
 			}
-			a.screen = SCREEN_ECOSYSTEM
+			a.screen = ScreenEcosystem
 			a.ecosystem = screens.NewEcosystem(a.width, a.height, a.selectedDir)
 			return a, a.ecosystem.Init()
 		}
 		return a, cmd
 
-	case SCREEN_ECOSYSTEM:
+	case ScreenEcosystem:
 		updated, cmd := a.ecosystem.Update(msg)
 		a.ecosystem = updated
 
@@ -215,7 +219,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.editMode = false
 				return a.goToRecap()
 			}
-			a.screen = SCREEN_FOLDER
+			a.screen = ScreenFolder
 			return a, nil
 		}
 		if updated.Done() {
@@ -226,13 +230,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.selectedPM = packagemanager.None
 			}
 			a.selectedEcosystem = newEco
-			a.screen = SCREEN_FRAMEWORK
+			a.screen = ScreenFramework
 			a.framework = screens.NewFramework(a.width, a.height, a.selectedEcosystem, a.selectedDir)
 			return a, a.framework.Init()
 		}
 		return a, cmd
 
-	case SCREEN_FRAMEWORK:
+	case ScreenFramework:
 		updated, cmd := a.framework.Update(msg)
 		a.framework = updated
 
@@ -242,7 +246,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.editMode = false
 				return a.goToRecap()
 			}
-			a.screen = SCREEN_ECOSYSTEM
+			a.screen = ScreenEcosystem
 			return a, nil
 		}
 		if updated.Done() {
@@ -260,13 +264,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.editMode = false
 				return a.goToRecap()
 			}
-			a.screen = SCREEN_PACKAGES
+			a.screen = ScreenPackages
 			a.packages = screens.NewPackages(a.width, a.height, a.selectedFramework, a.selectedDir)
 			return a, a.packages.Init()
 		}
 		return a, cmd
 
-	case SCREEN_PACKAGES:
+	case ScreenPackages:
 		updated, cmd := a.packages.Update(msg)
 		a.packages = updated
 
@@ -280,21 +284,21 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.packages.ConsumeBack()
 			if a.browseMode {
 				a.browseMode = false
-				a.screen = SCREEN_WELCOME
+				a.screen = ScreenWelcome
 				return a, nil
 			}
 			if a.editMode {
 				a.editMode = false
 				return a.goToRecap()
 			}
-			a.screen = SCREEN_FRAMEWORK
+			a.screen = ScreenFramework
 			return a, nil
 		}
 		if updated.Done() {
 			a.packages.ConsumeDone()
 			if a.browseMode {
 				a.browseMode = false
-				a.screen = SCREEN_WELCOME
+				a.screen = ScreenWelcome
 				return a, nil
 			}
 			a.selectedPackages = a.packages.SelectedPackages()
@@ -302,13 +306,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.editMode = false
 				return a.goToRecap()
 			}
-			a.screen = SCREEN_GIT
+			a.screen = ScreenGit
 			a.git = screens.Git(a.width, a.height, a.selectedDir, screens.GitConfig{})
 			return a, a.git.Init()
 		}
 		return a, cmd
 
-	case SCREEN_GIT:
+	case ScreenGit:
 		updated, cmd := a.git.Update(msg)
 		a.git = updated
 
@@ -318,7 +322,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.editMode = false
 				return a.goToRecap()
 			}
-			a.screen = SCREEN_PACKAGES
+			a.screen = ScreenPackages
 			return a, nil
 		}
 		if updated.Done() {
@@ -332,7 +336,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if a.selectedFramework.Ecosystem == "js" {
-				a.screen = SCREEN_PM_SELECT
+				a.screen = ScreenPMSelect
 				a.pmSelect = screens.NewPMSelect(a.width, a.height, a.selectedPM)
 				return a, a.pmSelect.Init()
 			}
@@ -340,7 +344,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, cmd
 
-	case SCREEN_PM_SELECT:
+	case ScreenPMSelect:
 		updated, cmd := a.pmSelect.Update(msg)
 		a.pmSelect = updated
 
@@ -350,7 +354,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.editMode = false
 				return a.goToRecap()
 			}
-			a.screen = SCREEN_GIT
+			a.screen = ScreenGit
 			return a, nil
 		}
 		if updated.Done() {
@@ -361,7 +365,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, cmd
 
-	case SCREEN_RECAP:
+	case ScreenRecap:
 		updated, cmd := a.recap.Update(msg)
 		a.recap = updated
 
@@ -374,7 +378,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.selectedPM = packagemanager.None
 			a.selectedGit = screens.GitConfig{}
 			a.editMode = false
-			a.screen = SCREEN_WELCOME
+			a.screen = ScreenWelcome
 			a.welcome = screens.NewWelcome(a.width, a.height)
 			return a, a.welcome.Init()
 		}
@@ -384,24 +388,25 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch updated.BackSection() {
 			case screens.RECAP_SECTION_FOLDER:
 				a.folder = screens.Folder(a.width, a.height, a.selectedDir)
-				a.screen = SCREEN_FOLDER
+				a.screen = ScreenFolder
 			case screens.RECAP_SECTION_FRAMEWORK:
 				a.ecosystem = screens.NewEcosystem(a.width, a.height, a.selectedDir)
-				a.screen = SCREEN_ECOSYSTEM
+				a.screen = ScreenEcosystem
 			case screens.RECAP_SECTION_PACKAGES:
 				a.packages = screens.NewPackagesFromCart(a.width, a.height, a.selectedFramework, a.selectedDir, a.selectedPackages)
-				a.screen = SCREEN_PACKAGES
+				a.screen = ScreenPackages
+				return a, a.packages.Init()
 			case screens.RECAP_SECTION_GIT:
 				a.git = screens.Git(a.width, a.height, a.selectedDir, a.selectedGit)
-				a.screen = SCREEN_GIT
+				a.screen = ScreenGit
 			case screens.RECAP_SECTION_PM:
 				if a.selectedFramework.Ecosystem == "js" {
 					a.pmSelect = screens.NewPMSelect(a.width, a.height, a.selectedPM)
-					a.screen = SCREEN_PM_SELECT
+					a.screen = ScreenPMSelect
 					return a, a.pmSelect.Init()
 				} else {
 					a.git = screens.Git(a.width, a.height, a.selectedDir, a.selectedGit)
-					a.screen = SCREEN_GIT
+					a.screen = ScreenGit
 				}
 			}
 			return a, nil
@@ -413,24 +418,24 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for i, s := range steps {
 				execSteps[i] = screens.ExecStep{Label: s.Label, Cmd: s.Cmd, Fn: s.Fn, StreamFn: s.StreamFn}
 			}
-			a.screen = SCREEN_EXEC
+			a.screen = ScreenExec
 			a.exec = screens.NewExec(a.width, a.height, execSteps, a.selectedDir)
 			return a, a.exec.Init()
 		}
 		return a, cmd
 
-	case SCREEN_GIT_CONFIG:
+	case ScreenGitConfig:
 		updated, cmd := a.gitConfig.Update(msg)
 		a.gitConfig = updated
 
 		if updated.IsBack() {
 			a.gitConfig.ConsumeBack()
-			a.screen = SCREEN_WELCOME
+			a.screen = ScreenWelcome
 			return a, nil
 		}
 		return a, cmd
 
-	case SCREEN_SETTINGS:
+	case ScreenSettings:
 		updated, cmd := a.settings.Update(msg)
 		a.settings = updated
 
@@ -439,12 +444,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if updated.CurrentPM() != packagemanager.None {
 				a.selectedPM = updated.CurrentPM()
 			}
-			a.screen = SCREEN_WELCOME
+			a.screen = ScreenWelcome
 			return a, nil
 		}
 		return a, cmd
 
-	case SCREEN_EXEC:
+	case ScreenExec:
 		updated, cmd := a.exec.Update(msg)
 		a.exec = updated
 
@@ -469,27 +474,27 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (a App) View() string {
 	switch a.screen {
-	case SCREEN_WELCOME:
+	case ScreenWelcome:
 		return a.welcome.View()
-	case SCREEN_FOLDER:
+	case ScreenFolder:
 		return a.folder.View()
-	case SCREEN_ECOSYSTEM:
+	case ScreenEcosystem:
 		return a.ecosystem.View()
-	case SCREEN_FRAMEWORK:
+	case ScreenFramework:
 		return a.framework.View()
-	case SCREEN_PACKAGES:
+	case ScreenPackages:
 		return a.packages.View()
-	case SCREEN_GIT:
+	case ScreenGit:
 		return a.git.View()
-	case SCREEN_PM_SELECT:
+	case ScreenPMSelect:
 		return a.pmSelect.View()
-	case SCREEN_RECAP:
+	case ScreenRecap:
 		return a.recap.View()
-	case SCREEN_GIT_CONFIG:
+	case ScreenGitConfig:
 		return a.gitConfig.View()
-	case SCREEN_SETTINGS:
+	case ScreenSettings:
 		return a.settings.View()
-	case SCREEN_EXEC:
+	case ScreenExec:
 		return a.exec.View()
 	}
 	return ""
@@ -497,7 +502,7 @@ func (a App) View() string {
 
 func (a App) goToRecap() (App, tea.Cmd) {
 	a.selectedPackages = a.packages.SelectedPackages()
-	a.screen = SCREEN_RECAP
+	a.screen = ScreenRecap
 	a.recap = screens.NewRecap(a.width, a.height, screens.RecapSummary{
 		Dir:       a.selectedDir,
 		Framework: a.selectedFramework,

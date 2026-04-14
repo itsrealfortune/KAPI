@@ -14,6 +14,7 @@ import (
 
 	"github.com/slouowzee/kapi/internal/config"
 	"github.com/slouowzee/kapi/internal/semver"
+	"github.com/slouowzee/kapi/internal/trends"
 )
 
 //go:embed defaults.json
@@ -55,62 +56,17 @@ func extractGithubRepo(repoURL string) string {
 	return m[1]
 }
 
-var (
-	starsLocalMu    sync.Mutex
-	starsLocalCache = make(map[string]starsLocalEntry)
-)
-
-type starsLocalEntry struct {
-	stars     int64
-	fetchedAt time.Time
-}
-
-const starsCacheTTL = time.Hour
-
 func fetchStars(ctx context.Context, repo string) int64 {
 	if repo == "" {
 		return 0
 	}
-	starsLocalMu.Lock()
-	if e, ok := starsLocalCache[repo]; ok && time.Since(e.fetchedAt) < starsCacheTTL {
-		starsLocalMu.Unlock()
-		return e.stars
-	}
-	starsLocalMu.Unlock()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+repo, nil)
-	if err != nil {
-		return 0
-	}
-	req.Header.Set("User-Agent", "kapi-cli")
-	req.Header.Set("Accept", "application/json")
-	if tok := config.GithubToken(); tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
-	}
-
-	client := &http.Client{Timeout: detailTimeout}
-	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		return 0
-	}
-	defer resp.Body.Close()
-
-	var payload struct {
-		Stars int64 `json:"stargazers_count"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return 0
-	}
-
-	starsLocalMu.Lock()
-	starsLocalCache[repo] = starsLocalEntry{stars: payload.Stars, fetchedAt: time.Now()}
-	starsLocalMu.Unlock()
-
-	return payload.Stars
+	tok := config.GithubToken()
+	stars, _ := trends.FetchStars(ctx, repo, tok)
+	return stars
 }
 
 func enrichNpm(ctx context.Context, client *http.Client, pkg *Package) {
-	encoded := strings.ReplaceAll(pkg.Name, "/", "%2F")
+	encoded := url.PathEscape(pkg.Name)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		"https://registry.npmjs.org/"+encoded+"/latest", nil)
 	if err != nil {
@@ -148,7 +104,7 @@ func enrichNpm(ctx context.Context, client *http.Client, pkg *Package) {
 
 	if pkg.Weekly == 0 {
 		dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			"https://api.npmjs.org/downloads/point/last-week/"+encoded, nil)
+			"https://api.npmjs.org/downloads/point/last-week/"+url.PathEscape(pkg.Name), nil)
 		if err == nil {
 			dlReq.Header.Set("User-Agent", "kapi-cli")
 			dlResp, err := client.Do(dlReq)

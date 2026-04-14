@@ -8,18 +8,16 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/slouowzee/kapi/internal/testutil"
 )
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func redirectTo(t *testing.T, ts *httptest.Server) {
 	t.Helper()
 	orig := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = orig })
 	inner := orig
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	http.DefaultTransport = testutil.RoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		req2 := req.Clone(req.Context())
 		req2.URL.Scheme = "http"
 		req2.URL.Host = ts.Listener.Addr().String()
@@ -68,7 +66,7 @@ func TestFetchStars_Success(t *testing.T) {
 }
 
 func TestFetchStars_CacheHit(t *testing.T) {
-	const repo = "test-owner/repo-fetchstars-cache"
+	const repo = "test-owner/repo-fetchstars-cache-" + "packages"
 
 	calls := 0
 	mux := http.NewServeMux()
@@ -81,16 +79,20 @@ func TestFetchStars_CacheHit(t *testing.T) {
 	defer ts.Close()
 	redirectTo(t, ts)
 
-	starsLocalMu.Lock()
-	starsLocalCache[repo] = starsLocalEntry{stars: 77, fetchedAt: time.Now()}
-	starsLocalMu.Unlock()
-
-	got := fetchStars(context.Background(), repo)
-	if got != 77 {
-		t.Errorf("fetchStars (cache) = %d, want 77", got)
+	got1 := fetchStars(context.Background(), repo)
+	if got1 != 99 {
+		t.Errorf("fetchStars (first call) = %d, want 99", got1)
 	}
-	if calls != 0 {
-		t.Errorf("expected 0 HTTP calls, got %d", calls)
+	if calls != 1 {
+		t.Errorf("expected 1 HTTP call after first fetch, got %d", calls)
+	}
+
+	got2 := fetchStars(context.Background(), repo)
+	if got2 != 99 {
+		t.Errorf("fetchStars (cached) = %d, want 99", got2)
+	}
+	if calls != 1 {
+		t.Errorf("expected still 1 HTTP call after cached fetch, got %d", calls)
 	}
 }
 

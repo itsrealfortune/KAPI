@@ -17,9 +17,19 @@ func HandleConfig(args []string) {
 
 	key := args[0]
 
+	if key == "--help" || key == "-h" {
+		printConfigHelp()
+		os.Exit(0)
+	}
+
 	if len(args) == 2 && args[1] == "--help" {
 		printKeyHelp(key)
 		os.Exit(0)
+	}
+
+	if len(args) == 1 {
+		handleConfigGet(key)
+		return
 	}
 
 	if len(args) != 2 {
@@ -37,7 +47,7 @@ func HandleConfig(args []string) {
 	switch key {
 	case "github.token":
 		cfg.GithubToken = value
-	case "package-manager":
+	case "package.manager":
 		pm := packagemanager.Parse(value)
 		if pm == packagemanager.None {
 			fmt.Fprintf(os.Stderr, "Invalid package manager %q. Valid values: npm, pnpm, yarn, bun\n", value)
@@ -57,13 +67,50 @@ func HandleConfig(args []string) {
 	fmt.Printf("✓ Set %s successfully.\n", key)
 }
 
+func handleConfigGet(key string) {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	switch key {
+	case "github.token":
+		if cfg.GithubToken == "" {
+			fmt.Println(styles.MutedStyle.Render("  github.token") + "  " + styles.DimStyle.Render("(not set)"))
+		} else {
+			fmt.Println(styles.MutedStyle.Render("  github.token") + "  " + maskToken(cfg.GithubToken))
+		}
+	case "package.manager":
+		if cfg.PackageManager == "" {
+			fmt.Println(styles.MutedStyle.Render("  package.manager") + "  " + styles.DimStyle.Render("(not set)"))
+		} else {
+			fmt.Println(styles.MutedStyle.Render("  package.manager") + "  " + cfg.PackageManager)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown configuration key: %s\n", key)
+		os.Exit(1)
+	}
+}
+
+func maskToken(tok string) string {
+	const show = 7
+	const tail = 4
+	if len(tok) <= show+tail {
+		return "***"
+	}
+	return tok[:show] + "***" + tok[len(tok)-tail:]
+}
+
 func printConfigHelp() {
 	PrintLogoAndTitle("Configuration")
-	fmt.Println("  " + styles.MutedStyle.Render("Usage:") + " kapi config <key> <value>")
+	fmt.Println("  " + styles.MutedStyle.Render("Usage:"))
+	fmt.Println("    " + styles.SelectedStyle.Render("kapi config <key>") + "          Read a configuration value")
+	fmt.Println("    " + styles.SelectedStyle.Render("kapi config <key> <value>") + "  Set a configuration value")
 	fmt.Println()
 	fmt.Println(styles.MutedStyle.Render("  Available keys:"))
 	fmt.Println("    " + styles.SelectedStyle.Render("github.token") + "      Set GitHub token to avoid API rate limits")
-	fmt.Println("    " + styles.SelectedStyle.Render("package-manager") + "   Set default JS package manager (npm|pnpm|yarn|bun)")
+	fmt.Println("    " + styles.SelectedStyle.Render("package.manager") + "   Set default JS package manager (npm|pnpm|yarn|bun)")
 	fmt.Println()
 	fmt.Println(styles.DimStyle.Render("  Tip: Use 'kapi config <key> --help' for details on a specific key."))
 	fmt.Println()
@@ -98,14 +145,14 @@ func printKeyHelp(key string) {
 		fmt.Println()
 		fmt.Println(styles.MutedStyle.Render("  Usage:"))
 		fmt.Println("    kapi config github.token " + styles.DimStyle.Render("\"ghp_your_token_here\""))
-	case "package-manager":
+	case "package.manager":
 		fmt.Println("  Sets the default JS package manager used when scaffolding new projects.")
 		fmt.Println("  You can still override it per-project during the wizard.")
 		fmt.Println()
 		fmt.Println(styles.MutedStyle.Render("  Valid values:") + "  npm   pnpm   yarn   bun")
 		fmt.Println()
 		fmt.Println(styles.MutedStyle.Render("  Usage:"))
-		fmt.Println("    kapi config package-manager " + styles.DimStyle.Render("pnpm"))
+		fmt.Println("    kapi config package.manager " + styles.DimStyle.Render("pnpm"))
 	default:
 		fmt.Printf("  No help available for unknown key: %s\n", key)
 	}

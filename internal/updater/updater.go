@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/slouowzee/kapi/internal/semver"
 )
@@ -24,6 +25,12 @@ type UpdateInfo struct {
 	LatestVersion  string
 }
 
+type HTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+var defaultClient HTTPClient = &http.Client{Timeout: 5 * time.Second}
+
 func checkLatestVersion(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, githubReleaseURL, nil)
 	if err != nil {
@@ -33,7 +40,7 @@ func checkLatestVersion(ctx context.Context) (string, error) {
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 	req.Header.Set("User-Agent", "kapi-updater")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := defaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}

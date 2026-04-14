@@ -3,16 +3,10 @@ package registry
 import (
 	_ "embed"
 	"encoding/json"
-	"net/http"
-	"time"
 )
 
-const API_URL = "#"
-
-const API_TIMEOUT = 3 * time.Second
-
 //go:embed frameworks.json
-var fallbackData []byte
+var embeddedData []byte
 
 type Framework struct {
 	ID               string   `json:"id"`
@@ -24,7 +18,7 @@ type Framework struct {
 	NpmPackage       string   `json:"npm_package,omitempty"`
 	PackagistPackage string   `json:"packagist_package,omitempty"`
 	GithubRepo       string   `json:"github_repo,omitempty"`
-	Interactive 	 bool     `json:"interactive,omitempty"`
+	Interactive      bool     `json:"interactive,omitempty"`
 }
 
 type registryPayload struct {
@@ -32,41 +26,9 @@ type registryPayload struct {
 }
 
 func Load() ([]Framework, error) {
-	if live, err := fetchLive(); err == nil {
-		return live, nil
-	}
-	return loadFallback()
-}
-
-func fetchLive() ([]Framework, error) {
-	if API_URL == "#" {
-		return nil, errPlaceholder
-	}
-
-	client := &http.Client{Timeout: API_TIMEOUT}
-	resp, err := client.Get(API_URL)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
 	var payload registryPayload
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := json.Unmarshal(embeddedData, &payload); err != nil {
 		return nil, err
 	}
 	return payload.Frameworks, nil
 }
-
-func loadFallback() ([]Framework, error) {
-	var payload registryPayload
-	if err := json.Unmarshal(fallbackData, &payload); err != nil {
-		return nil, err
-	}
-	return payload.Frameworks, nil
-}
-
-var errPlaceholder = placeholderErr("API URL is a placeholder")
-
-type placeholderErr string
-
-func (e placeholderErr) Error() string { return string(e) }

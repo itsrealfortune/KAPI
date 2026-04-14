@@ -62,12 +62,16 @@ func TestLoad_UniqueIDs(t *testing.T) {
 	}
 }
 
-func TestLoadFallback_DirectCall(t *testing.T) {
-	frameworks, err := loadFallback()
+func TestLoad_IsIdempotent(t *testing.T) {
+	first, err := Load()
 	if err != nil {
-		t.Fatalf("loadFallback() error: %v", err)
+		t.Fatalf("first Load() error: %v", err)
 	}
-	if len(frameworks) == 0 {
-		t.Fatal("loadFallback() returned empty slice")
+	second, err := Load()
+	if err != nil {
+		t.Fatalf("second Load() error: %v", err)
+	}
+	if len(first) != len(second) {
+		t.Errorf("Load() returned different lengths: %d vs %d", len(first), len(second))
 	}
 }
