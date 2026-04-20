@@ -88,6 +88,16 @@ func FetchTokenScopes(ctx context.Context) (TokenScopes, error) {
 	return s, nil
 }
 
+func CheckGitHubScopeError(resp *http.Response) error {
+	if resp.StatusCode == http.StatusNotFound {
+		if acc := resp.Header.Get("X-Accepted-OAuth-Scopes"); acc != "" {
+			has := resp.Header.Get("X-OAuth-Scopes")
+			return fmt.Errorf("GitHub token missing required scopes (has: %s, needs: %s)", has, acc)
+		}
+	}
+	return nil
+}
+
 type Config struct {
 	GithubToken    string `json:"github_token,omitempty"`
 	PackageManager string `json:"package_manager,omitempty"`
