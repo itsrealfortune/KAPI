@@ -17,7 +17,7 @@ func main() {
 		case "config":
 			cli.HandleConfig(os.Args[2:])
 			return
-		case "version", "--version", "-v":
+		case "version", "-version", "--version", "-v":
 			fmt.Println(updater.CurrentVersion)
 			return
 		case "help", "--help", "-h":
