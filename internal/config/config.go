@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -20,7 +21,22 @@ func GithubToken() string {
 	if cfg, err := Load(); err == nil && cfg.GithubToken != "" {
 		return cfg.GithubToken
 	}
+	if tok := ghAuthToken(); tok != "" {
+		return tok
+	}
 	return ""
+}
+
+func ghAuthToken() string {
+	path, err := exec.LookPath("gh")
+	if err != nil || path == "" {
+		return ""
+	}
+	out, err := exec.Command(path, "auth", "token").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 type TokenScopes struct {
